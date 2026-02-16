@@ -2,32 +2,21 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <string.h>
+#include <stdint.h>
 
 #include "../include/glad/glad.h"
 #define GLFW_INCLUDE_NONE
 #include "GLFW/glfw3.h"
 #include "../include/linmath.h"
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 
 
-typedef struct {
-    vec2 pos;
-    vec3 col;
-} Vertex;
-
-
-static const Vertex vertices[3] = {
-    {
-        {0.5f, 0.5f},
-        {1.f, 0.f, 0.f}
-    },
-    {
-        {0.f, -0.5f},
-        {0.f, 1.f, 0.f}
-    },
-    {
-        {-0.5f, 0.5f},
-        {0.f, 0.f, 1.f}
-    }
+static const float vertices[8] = {
+    -1.f, -1.f,
+    -1.f, 1.f,
+    1.f, -1.f,
+    1.f, 1.f,
 };
 
 GLuint load_shd(const char *filename, GLenum type, const char *entry);
@@ -43,6 +32,10 @@ int main(void) {
         return -1;
     }
     
+    size_t tex_w = 64;
+    size_t tex_h = 48;
+    float *thing = calloc(4 * tex_w * tex_h, sizeof(float));
+    thing[0] = 1.f;
 
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
@@ -55,31 +48,37 @@ int main(void) {
 
     GLuint ray_text;
     glad_glGenTextures(1, &ray_text);
+    glad_glActiveTexture(GL_TEXTURE0);
     glad_glBindTexture(GL_TEXTURE_2D, ray_text);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glad_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, tex_w, tex_h, 0, GL_RGBA, GL_FLOAT, thing);
     
-    const GLuint vert = load_shd("../shd/triangle.vert.spv", GL_VERTEX_SHADER, "main");
-    const GLuint frag = load_shd("../shd/triangle.frag.spv", GL_FRAGMENT_SHADER, "main");
+    glad_glBindImageTexture(0, ray_text, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F);
+    
+    const GLuint comp = load_shd("../shd/raytrace.comp.spv", GL_COMPUTE_SHADER, "main");
+    const GLuint vert = load_shd("../shd/texture.vert.spv", GL_VERTEX_SHADER, "main");
+    const GLuint frag = load_shd("../shd/texture.frag.spv", GL_FRAGMENT_SHADER, "main");
+
+    const GLuint compute = glad_glCreateProgram();
+    glad_glAttachShader(compute, comp);
+    glad_glLinkProgram(compute);
 
     const GLuint program = glad_glCreateProgram();
     glad_glAttachShader(program, vert);
     glad_glAttachShader(program, frag);
     glad_glLinkProgram(program);
-    glad_glDeleteShader(vert);
+
     glad_glDeleteShader(frag);
+    glad_glDeleteShader(vert);
+    glad_glDeleteShader(comp);
     
-    const GLint vpos_loc = 0;//glad_glGetAttribLocation(program, "v_pos");
-    printf("%d\n", vpos_loc);
-    const GLint vcol_loc = 1;//glad_glGetAttribLocation(program, "v_col");
-    printf("%d\n", vcol_loc);
-    const GLint mvp_loc = 2;//glad_glGetUniformLocation(program, "MVP");
-    printf("%d\n", mvp_loc);
+    const GLint tex_loc = 0;
+    const GLint vpos_loc = 0;
     
     glad_glEnableVertexAttribArray(vpos_loc);
-    glad_glVertexAttribPointer(vpos_loc, 2, GL_FLOAT, GL_FALSE,
-                          sizeof(Vertex), (void *)offsetof(Vertex, pos));
-    glad_glEnableVertexAttribArray(vcol_loc);
-    glad_glVertexAttribPointer(vcol_loc, 3, GL_FLOAT, GL_FALSE,
-                          sizeof(Vertex), (void *)offsetof(Vertex, col));
+    glad_glVertexAttribPointer(vpos_loc, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2, (void *)0);
+    
 
     while (!glfwWindowShouldClose(window)) {
         int width, height;
@@ -87,25 +86,28 @@ int main(void) {
         const float ratio = width / (float)height;
         
         glad_glViewport(0, 0, width, height);
-        glad_glClear(GL_COLOR_BUFFER_BIT);
 
-        mat4x4 m, p, mvp;
-        mat4x4_identity(m);
-        mat4x4_rotate_Z(m, m, (float)glfwGetTime());
-        mat4x4_ortho(p, -ratio, ratio, -1.f, 1.f, 1.f, -1.f);
-        mat4x4_mul(mvp, p, m);
+        glad_glUseProgram(compute);
+        glad_glUniform1i(tex_loc, 0);
 
+        glad_glDispatchCompute((tex_w + 15) / 16, (tex_h + 15) / 16, 1);
+        
+        glad_glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
         glad_glUseProgram(program);
-        glad_glUniformMatrix4fv(mvp_loc, 1, GL_FALSE, (const GLfloat*) &mvp);
-        glad_glDrawArrays(GL_TRIANGLES, 0, 3);
+        glad_glUniform1i(tex_loc, 0);
+
+        glad_glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glad_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
-
+    
     glad_glDeleteProgram(program);
+    glad_glDeleteTextures(1, &ray_text);
     glad_glDeleteBuffers(1, &vert_buff);
+    free(thing);
     glfwTerminate();
     return 0;
 }
@@ -118,6 +120,7 @@ GLuint load_shd(const char *filename, GLenum type, const char *entry) {
     fseek(f, 0, SEEK_SET);
     char *buff = malloc(len);
     fread(buff, len, 1, f);
+    fclose(f);
 
     const GLuint shd = glad_glCreateShader(type);
     glad_glShaderBinary(1, &shd, GL_SHADER_BINARY_FORMAT_SPIR_V, (const void *)buff, len);

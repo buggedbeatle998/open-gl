@@ -1,0 +1,19 @@
+#version 460 core
+
+layout (local_size_x = 16, local_size_y = 16) in;
+
+layout (rgba32f, location = 0) uniform writeonly image2D tex;
+
+const vec4 bl = vec4(1.0, 0.0, 0.0, 1.0);
+const vec4 tr = vec4(0.0, 1.0, 0.0, 1.0);
+const vec2 consts = vec2(0.0, 0.1);
+
+void main(void) {
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 img_size = imageSize(tex);
+
+    if (all(lessThan(texel, img_size))) {
+        float blend = dot(texel, consts.yy) / dot(img_size, consts.yy);
+        imageStore(tex, texel, mix(bl, tr, blend));
+    }
+}
