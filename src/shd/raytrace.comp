@@ -2,18 +2,56 @@
 
 layout (local_size_x = 16, local_size_y = 16) in;
 
-layout (rgba32f, location = 0) uniform writeonly image2D tex;
+struct Sphere {
+    vec3 pos;
+    float rad;
+};
 
-const vec4 bl = vec4(1.0, 0.0, 0.0, 1.0);
-const vec4 tr = vec4(0.0, 1.0, 0.0, 1.0);
+layout (std140, binding = 0) readonly buffer Spheres {
+    Sphere spheres[];
+} spheres;
+
+layout (rgba32f, location = 0) writeonly uniform image2D tex;
+layout (std140, binding = 1) readonly uniform pconst {
+    vec3 cam_pos;
+    vec3 cam_dir;
+    vec3 sun_dir;
+    vec4 ground;
+    vec4 horizon;
+    vec4 zenith;
+    float horz_dist;
+    float fov;
+};
+
+
 const vec2 consts = vec2(0.0, 0.1);
+const float half_pi = 1.571;
+const ivec2 res = ivec2(640, 480);
+const vec2 inv_res = 1.0 / res;
+const float asp_rat = res.x * inv_res.y;
+
+
+vec4 sample_env(vec3 dir);
+
 
 void main(void) {
     ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
     ivec2 img_size = imageSize(tex);
 
     if (all(lessThan(texel, img_size))) {
-        float blend = dot(texel, consts.yy) / dot(img_size, consts.yy);
-        imageStore(tex, texel, mix(bl, tr, blend));
+        float horz = sin(fov) * (texel.x - ((res.x >> 1) + 1)) * inv_res.x;
+        float vert = sin(fov * asp_rat) * (texel.y - ((res.y >> 1) + 1)) * inv_res.y;
+        vec3 start = normalize(vec3(horz, vert, 1.0));
+        imageStore(tex, texel, sample_env(start));
     }
+}
+
+vec4 sample_env(vec3 dir) {
+    if (fma(dir.y, horz_dist, cam_pos.y) < 0)
+        return ground;
+    
+    float temp = half_pi * horz_dist;
+    float blend = fma(dir.y, -horz_dist, temp) / (temp + cam_pos.y);
+    blend = pow(blend, 8);
+    return mix(zenith, horizon, blend);
 }

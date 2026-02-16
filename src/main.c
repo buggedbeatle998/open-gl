@@ -12,6 +12,22 @@
 #include "stb_image.h"
 
 
+typedef struct {
+    vec3 pos;
+    float rad;
+} sphere;
+
+typedef struct {
+    vec4 cam_pos;
+    vec4 cam_dir;
+    vec4 sun_dir;
+    vec4 ground;
+    vec4 horizon;
+    vec4 zenith;
+    float horz_dist;
+    float fov;
+} push_consts;
+
 static const float vertices[8] = {
     -1.f, -1.f,
     -1.f, 1.f,
@@ -19,7 +35,12 @@ static const float vertices[8] = {
     1.f, 1.f,
 };
 
+static const sphere sphere_arr[1] = {
+    (sphere){{0.f, 1.f, 10.f}, 3.f}
+};
+
 GLuint load_shd(const char *filename, GLenum type, const char *entry);
+GLuint make_draw_tex(const size_t tex_w, const size_t tex_h, GLenum texture);
 
 
 int main(void) {
@@ -31,11 +52,6 @@ int main(void) {
         glfwTerminate();
         return -1;
     }
-    
-    size_t tex_w = 64;
-    size_t tex_h = 48;
-    float *thing = calloc(4 * tex_w * tex_h, sizeof(float));
-    thing[0] = 1.f;
 
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
@@ -46,15 +62,28 @@ int main(void) {
     glad_glBindBuffer(GL_ARRAY_BUFFER, vert_buff);
     glad_glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
-    GLuint ray_text;
-    glad_glGenTextures(1, &ray_text);
-    glad_glActiveTexture(GL_TEXTURE0);
-    glad_glBindTexture(GL_TEXTURE_2D, ray_text);
-    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glad_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, tex_w, tex_h, 0, GL_RGBA, GL_FLOAT, thing);
+    GLuint spheres;
+    glad_glGenBuffers(1, &spheres);
+    glad_glBindBuffer(GL_SHADER_STORAGE_BUFFER, spheres);
+    glad_glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(sphere_arr), sphere_arr, GL_STATIC_READ);
     
-    glad_glBindImageTexture(0, ray_text, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F);
+    GLuint consts;
+    glad_glGenBuffers(1, &consts);
+    glad_glBindBuffer(GL_UNIFORM_BUFFER, consts);
+    glad_glBufferData(GL_UNIFORM_BUFFER, sizeof(push_consts), &(push_consts){
+        {0.f, 0.f, 0.f            , 0.f},
+        {0.f, 0.f, 1.f            , 0.f},
+        {0.f, 1.f, 0.f            , 0.f},
+        {0.5f, 0.5f, 0.5f, 1.f},
+        {0.8f, 0.9f, 1.f, 1.f},
+        {0.5f, 0.5f, 1.f, 1.f},
+        5000.f,
+        1.047f
+    }, GL_STATIC_READ);
+
+    const size_t tex_w = 640;
+    const size_t tex_h = 480;
+    GLuint ray_text = make_draw_tex(tex_w, tex_h, GL_TEXTURE0);
     
     const GLuint comp = load_shd("../shd/raytrace.comp.spv", GL_COMPUTE_SHADER, "main");
     const GLuint vert = load_shd("../shd/texture.vert.spv", GL_VERTEX_SHADER, "main");
@@ -75,10 +104,15 @@ int main(void) {
     
     const GLint tex_loc = 0;
     const GLint vpos_loc = 0;
+
+    const GLint sphere_bind = 0;
+    const GLint const_bind = 1;
     
     glad_glEnableVertexAttribArray(vpos_loc);
     glad_glVertexAttribPointer(vpos_loc, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2, (void *)0);
-    
+
+    glad_glBindBufferBase(GL_SHADER_STORAGE_BUFFER, sphere_bind, spheres);
+    glad_glBindBufferBase(GL_UNIFORM_BUFFER, const_bind, consts);
 
     while (!glfwWindowShouldClose(window)) {
         int width, height;
@@ -107,7 +141,6 @@ int main(void) {
     glad_glDeleteProgram(program);
     glad_glDeleteTextures(1, &ray_text);
     glad_glDeleteBuffers(1, &vert_buff);
-    free(thing);
     glfwTerminate();
     return 0;
 }
@@ -141,4 +174,17 @@ GLuint load_shd(const char *filename, GLenum type, const char *entry) {
     free(buff);
 
     return shd;
+}
+
+
+GLuint make_draw_tex(const size_t tex_w, const size_t tex_h, const GLenum texture) {
+    GLuint tex;
+    glad_glGenTextures(1, &tex);
+    glad_glActiveTexture(texture);
+    glad_glBindTexture(GL_TEXTURE_2D, tex);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glad_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, tex_w, tex_h, 0, GL_RGBA, GL_FLOAT, NULL);
+    glad_glBindImageTexture(0, tex, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F);
+    return tex;
 }
