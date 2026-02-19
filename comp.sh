@@ -1,5 +1,4 @@
-if [ $# -eq 0 ]
-then
+if [ $# -eq 0 ]; then
     echo "Please supply a project name!"
 else
     rm shd/*

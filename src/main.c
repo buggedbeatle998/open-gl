@@ -5,8 +5,7 @@
 #include <stdint.h>
 
 #include "../include/glad/glad.h"
-#define GLFW_INCLUDE_NONE
-#include "GLFW/glfw3.h"
+#include <SDL3/SDL.h>
 #include "../include/linmath.h"
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -65,7 +64,7 @@ GLuint make_buffer(GLenum type, GLenum usage, size_t size, const void *data);
 
 
 int main(void) {
-    if (!glfwInit())
+    if (!SDL_Init(SDL_INIT_VIDEO))
         return -1;
    
     const size_t num_spheres = 10;
@@ -78,15 +77,17 @@ int main(void) {
     const size_t tex_w = 1980;
     const size_t tex_h = 1080;
 
-    GLFWwindow *window = glfwCreateWindow(tex_w, tex_h, "Hello, World!", NULL, NULL);
+    SDL_Window *window = SDL_CreateWindow("Hello, World!", tex_w, tex_h, SDL_WINDOW_OPENGL);
     if (!window) {
-        glfwTerminate();
+        SDL_Quit();
         return -1;
     }
+    SDL_Renderer *screen = SDL_CreateRenderer(window, "Hi");
 
-    glfwMakeContextCurrent(window);
-    glfwSwapInterval(1);
-    gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
+    SDL_GLContext context = SDL_GL_CreateContext(window);
+    SDL_GL_MakeCurrent(window, context);
+    SDL_GL_SetSwapInterval(1);
+    gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress);
     
     GLuint vert_buff = make_buffer(GL_ARRAY_BUFFER, GL_STATIC_DRAW,
             sizeof(vertices), vertices);
@@ -143,9 +144,18 @@ int main(void) {
     glad_glUseProgram(program);    
     glad_glUniform1i(tex_loc, 0);
 
+    bool run = true;
     int width, height;
-    while (!glfwWindowShouldClose(window)) {
-        glfwGetFramebufferSize(window, &width, &height);
+    while (run) {
+        SDL_Event ev;
+        while (SDL_PollEvent(&ev)) {
+            if (ev.type == SDL_EVENT_QUIT) {
+                run = false;
+                break;
+            }
+        }
+        SDL_RenderClear(screen);
+        SDL_GetWindowSize(window, &width, &height);
         glad_glViewport(0, 0, width, height);
 
         glad_glUseProgram(compute);
@@ -160,14 +170,13 @@ int main(void) {
         glad_glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glad_glDrawArraysIndirect(GL_TRIANGLE_STRIP, 0);
 
-        glfwSwapBuffers(window);
-        glfwPollEvents();
+        SDL_GL_SwapWindow(window);
     }
     
     glad_glDeleteProgram(program);
     glad_glDeleteTextures(1, &ray_text);
     glad_glDeleteBuffers(1, &vert_buff);
-    glfwTerminate();
+    SDL_Quit();
     return 0;
 }
 
