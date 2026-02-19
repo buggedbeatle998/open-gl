@@ -12,20 +12,42 @@
 #include "stb_image.h"
 
 
+static float rand_float(float lower, float upper) {
+    return (float)rand() / RAND_MAX * (upper - lower) + lower;
+}
+
+typedef struct {
+    uint x;
+    uint y;
+    uint z;
+} dispindircmd;
+
+typedef struct {
+    uint count;
+    uint inst_count;
+    uint first;
+    uint base_inst;
+} drawarrindircmd;
+
 typedef struct {
     vec3 pos;
     float rad;
-} sphere;
+} Sphere;
 
 typedef struct {
-    vec4 cam_pos;
-    vec4 cam_dir;
+    float data[6];
+} Camera;
+
+typedef struct {
+    uint32_t res[2];
+    vec2 inv_res;
     vec4 sun_dir;
     vec4 ground;
     vec4 horizon;
     vec4 zenith;
     float horz_dist;
     float fov;
+    float asp_rat;
 } push_consts;
 
 static const float vertices[8] = {
@@ -35,19 +57,28 @@ static const float vertices[8] = {
     1.f, 1.f,
 };
 
-static const sphere sphere_arr[1] = {
-    (sphere){{0.f, 1.f, 10.f}, 3.f}
-};
 
 GLuint load_shd(const char *filename, GLenum type, const char *entry);
+void shd_loadatt(GLuint program, const char *filename, GLenum type, const char *entry);
 GLuint make_draw_tex(const size_t tex_w, const size_t tex_h, GLenum texture);
+GLuint make_buffer(GLenum type, GLenum usage, size_t size, const void *data);
 
 
 int main(void) {
     if (!glfwInit())
         return -1;
+   
+    const size_t num_spheres = 10;
+    Sphere *sphere_arr = malloc(sizeof(Sphere) * num_spheres);
+    for (size_t i = 0; i < num_spheres; ++i) {
+        sphere_arr[i] = (Sphere){{rand_float(-5.f, 5.f), rand_float(5.f, 15.f), rand_float(5.f, 15.f)}, 1.f};
+    }
+    Camera main_cam = {{0.f, 10.f, 0.f, 0.f, 0.f, 1.f}};
+    
+    const size_t tex_w = 1980;
+    const size_t tex_h = 1080;
 
-    GLFWwindow *window = glfwCreateWindow(640, 480, "Hello, World!", NULL, NULL);
+    GLFWwindow *window = glfwCreateWindow(tex_w, tex_h, "Hello, World!", NULL, NULL);
     if (!window) {
         glfwTerminate();
         return -1;
@@ -57,53 +88,46 @@ int main(void) {
     glfwSwapInterval(1);
     gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
     
-    GLuint vert_buff;
-    glad_glGenBuffers(1, &vert_buff);
-    glad_glBindBuffer(GL_ARRAY_BUFFER, vert_buff);
-    glad_glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    GLuint vert_buff = make_buffer(GL_ARRAY_BUFFER, GL_STATIC_DRAW,
+            sizeof(vertices), vertices);
 
-    GLuint spheres;
-    glad_glGenBuffers(1, &spheres);
-    glad_glBindBuffer(GL_SHADER_STORAGE_BUFFER, spheres);
-    glad_glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(sphere_arr), sphere_arr, GL_STATIC_READ);
-    
-    GLuint consts;
-    glad_glGenBuffers(1, &consts);
-    glad_glBindBuffer(GL_UNIFORM_BUFFER, consts);
-    glad_glBufferData(GL_UNIFORM_BUFFER, sizeof(push_consts), &(push_consts){
-        {0.f, 0.f, 0.f            , 0.f},
-        {0.f, 0.f, 1.f            , 0.f},
-        {0.f, 1.f, 0.f            , 0.f},
+    GLuint spheres = make_buffer(GL_SHADER_STORAGE_BUFFER, GL_STATIC_READ,
+            sizeof(Sphere) * num_spheres, sphere_arr);
+    free(sphere_arr);
+
+    GLuint consts = make_buffer(GL_UNIFORM_BUFFER, GL_STATIC_READ,
+            sizeof(push_consts), &(push_consts){
+        {tex_w, tex_h             },
+        {1.f/tex_w, 1.f/tex_h     },
+        {0.f, 1.f, 0.f            ,0.f},
         {0.5f, 0.5f, 0.5f, 1.f},
         {0.8f, 0.9f, 1.f, 1.f},
         {0.5f, 0.5f, 1.f, 1.f},
         5000.f,
-        1.047f
-    }, GL_STATIC_READ);
+        1.047f,
+        (float)tex_h / tex_w
+    });
 
-    const size_t tex_w = 640;
-    const size_t tex_h = 480;
+    make_buffer(GL_DISPATCH_INDIRECT_BUFFER, GL_STATIC_READ,
+            sizeof(dispindircmd), &(dispindircmd){(tex_w + 31) / 32, (tex_h + 31) / 32, 1});
+    
+    make_buffer(GL_DRAW_INDIRECT_BUFFER, GL_STATIC_READ,
+            sizeof(drawarrindircmd), &(drawarrindircmd){4, 1, 0, 0});
+
     GLuint ray_text = make_draw_tex(tex_w, tex_h, GL_TEXTURE0);
     
-    const GLuint comp = load_shd("../shd/raytrace.comp.spv", GL_COMPUTE_SHADER, "main");
-    const GLuint vert = load_shd("../shd/texture.vert.spv", GL_VERTEX_SHADER, "main");
-    const GLuint frag = load_shd("../shd/texture.frag.spv", GL_FRAGMENT_SHADER, "main");
-
     const GLuint compute = glad_glCreateProgram();
-    glad_glAttachShader(compute, comp);
+    shd_loadatt(compute, "../shd/raytrace.comp.spv", GL_COMPUTE_SHADER, "main");
     glad_glLinkProgram(compute);
 
     const GLuint program = glad_glCreateProgram();
-    glad_glAttachShader(program, vert);
-    glad_glAttachShader(program, frag);
+    shd_loadatt(program, "../shd/texture.vert.spv", GL_VERTEX_SHADER, "main");
+    shd_loadatt(program, "../shd/texture.frag.spv", GL_FRAGMENT_SHADER, "main");
     glad_glLinkProgram(program);
-
-    glad_glDeleteShader(frag);
-    glad_glDeleteShader(vert);
-    glad_glDeleteShader(comp);
     
     const GLint tex_loc = 0;
     const GLint vpos_loc = 0;
+    const GLint cam_loc = 1;
 
     const GLint sphere_bind = 0;
     const GLint const_bind = 1;
@@ -113,26 +137,28 @@ int main(void) {
 
     glad_glBindBufferBase(GL_SHADER_STORAGE_BUFFER, sphere_bind, spheres);
     glad_glBindBufferBase(GL_UNIFORM_BUFFER, const_bind, consts);
+    
+    glad_glUseProgram(compute);    
+    glad_glUniform1i(tex_loc, 0);
+    glad_glUseProgram(program);    
+    glad_glUniform1i(tex_loc, 0);
 
+    int width, height;
     while (!glfwWindowShouldClose(window)) {
-        int width, height;
         glfwGetFramebufferSize(window, &width, &height);
-        const float ratio = width / (float)height;
-        
         glad_glViewport(0, 0, width, height);
 
         glad_glUseProgram(compute);
-        glad_glUniform1i(tex_loc, 0);
-
-        glad_glDispatchCompute((tex_w + 15) / 16, (tex_h + 15) / 16, 1);
+        
+        glad_glUniformMatrix2x3fv(cam_loc, 1, GL_FALSE, main_cam.data);
+        glad_glDispatchComputeIndirect(0);
         
         glad_glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
         glad_glUseProgram(program);
-        glad_glUniform1i(tex_loc, 0);
 
         glad_glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        glad_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        glad_glDrawArraysIndirect(GL_TRIANGLE_STRIP, 0);
 
         glfwSwapBuffers(window);
         glfwPollEvents();
@@ -177,6 +203,15 @@ GLuint load_shd(const char *filename, GLenum type, const char *entry) {
 }
 
 
+void shd_loadatt(GLuint program, const char *filename, GLenum type, const char *entry) {
+    const GLuint shd = load_shd(filename, type, entry);
+
+    glad_glAttachShader(program, shd);
+
+    glad_glDeleteShader(shd);
+}
+
+
 GLuint make_draw_tex(const size_t tex_w, const size_t tex_h, const GLenum texture) {
     GLuint tex;
     glad_glGenTextures(1, &tex);
@@ -187,4 +222,14 @@ GLuint make_draw_tex(const size_t tex_w, const size_t tex_h, const GLenum textur
     glad_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, tex_w, tex_h, 0, GL_RGBA, GL_FLOAT, NULL);
     glad_glBindImageTexture(0, tex, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F);
     return tex;
+}
+
+
+GLuint make_buffer(GLenum type, GLenum usage, size_t size, const void *data) {
+    GLuint buff;
+    glad_glGenBuffers(1, &buff);
+    glad_glBindBuffer(type, buff);
+    glad_glBufferData(type, size, data, usage);
+    
+    return buff;
 }
