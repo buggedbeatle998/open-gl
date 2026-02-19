@@ -74,8 +74,8 @@ int main(void) {
     }
     Camera main_cam = {{0.f, 10.f, 0.f, 0.f, 0.f, 1.f}};
     
-    const size_t tex_w = 1980;
-    const size_t tex_h = 1080;
+    int tex_w = 1280;
+    int tex_h = 960;
 
     SDL_Window *window = SDL_CreateWindow("Hello, World!", tex_w, tex_h, SDL_WINDOW_OPENGL);
     if (!window) {
@@ -144,8 +144,8 @@ int main(void) {
     glad_glUseProgram(program);    
     glad_glUniform1i(tex_loc, 0);
 
-    bool run = true;
     int width, height;
+    bool run = true;
     while (run) {
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
@@ -169,6 +169,8 @@ int main(void) {
 
         glad_glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glad_glDrawArraysIndirect(GL_TRIANGLE_STRIP, 0);
+        
+        SDL_RenderPresent(screen);
 
         SDL_GL_SwapWindow(window);
     }
@@ -176,6 +178,8 @@ int main(void) {
     glad_glDeleteProgram(program);
     glad_glDeleteTextures(1, &ray_text);
     glad_glDeleteBuffers(1, &vert_buff);
+    SDL_DestroyRenderer(screen);
+    SDL_DestroyWindow(window);
     SDL_Quit();
     return 0;
 }
