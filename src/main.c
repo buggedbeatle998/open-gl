@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <stdint.h>
+#include <time.h>
 
 #include "../include/glad/glad.h"
 #include <SDL3/SDL.h>
@@ -10,6 +11,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
+#define SPEED 0.05f
 
 static float rand_float(float lower, float upper) {
     return (float)rand() / RAND_MAX * (upper - lower) + lower;
@@ -43,7 +45,7 @@ typedef struct {
     vec4 sun_dir;
     vec4 ground;
     vec4 horizon;
-    vec4 zenith;
+    vec3 zenith;
     float horz_dist;
     float fov;
     float asp_rat;
@@ -61,7 +63,8 @@ GLuint load_shd(const char *filename, GLenum type, const char *entry);
 void shd_loadatt(GLuint program, const char *filename, GLenum type, const char *entry);
 GLuint make_draw_tex(const size_t tex_w, const size_t tex_h, GLenum texture);
 GLuint make_buffer(GLenum type, GLenum usage, size_t size, const void *data);
-
+uint8_t handle_keys(SDL_Event ev, uint8_t velo);
+void handle_move(Camera *cam, uint8_t velo);
 
 int main(void) {
     if (!SDL_Init(SDL_INIT_VIDEO))
@@ -74,8 +77,10 @@ int main(void) {
     }
     Camera main_cam = {{0.f, 10.f, 0.f, 0.f, 0.f, 1.f}};
     
-    int tex_w = 1280;
-    int tex_h = 960;
+    const int tex_w = 1280;
+    const int tex_h = 960;
+    const int max_fps = 60;
+    const float stpf = 1000.f / max_fps;
 
     SDL_Window *window = SDL_CreateWindow("Hello, World!", tex_w, tex_h, SDL_WINDOW_OPENGL);
     if (!window) {
@@ -83,6 +88,7 @@ int main(void) {
         return -1;
     }
     SDL_Renderer *screen = SDL_CreateRenderer(window, "Hi");
+    SDL_SetRenderVSync(screen, 1);
 
     SDL_GLContext context = SDL_GL_CreateContext(window);
     SDL_GL_MakeCurrent(window, context);
@@ -101,9 +107,9 @@ int main(void) {
         {tex_w, tex_h             },
         {1.f/tex_w, 1.f/tex_h     },
         {0.f, 1.f, 0.f            ,0.f},
-        {0.5f, 0.5f, 0.5f, 1.f},
-        {0.8f, 0.9f, 1.f, 1.f},
-        {0.5f, 0.5f, 1.f, 1.f},
+        {0.5f, 0.5f, 0.5f         ,0.f},
+        {0.8f, 0.9f, 1.f          ,0.f},
+        {0.5f, 0.5f, 1.f          },
         5000.f,
         1.047f,
         (float)tex_h / tex_w
@@ -144,16 +150,31 @@ int main(void) {
     glad_glUseProgram(program);    
     glad_glUniform1i(tex_loc, 0);
 
+    uint8_t velo = 0U;
     int width, height;
     bool run = true;
     while (run) {
+        //time_t tstart = SDL_GetPerformanceCounter();
+
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
-            if (ev.type == SDL_EVENT_QUIT) {
-                run = false;
-                break;
+            switch (ev.type) {
+                case SDL_EVENT_QUIT:
+                    run = false;
+                    break;
+                
+                case SDL_EVENT_KEY_DOWN:
+                case SDL_EVENT_KEY_UP:
+                    velo = handle_keys(ev, velo);
+                    break;
+
+                default:
+                    break;
             }
         }
+        if (velo)
+            handle_move(&main_cam, velo);
+
         SDL_RenderClear(screen);
         SDL_GetWindowSize(window, &width, &height);
         glad_glViewport(0, 0, width, height);
@@ -173,6 +194,10 @@ int main(void) {
         SDL_RenderPresent(screen);
 
         SDL_GL_SwapWindow(window);
+
+        //time_t tend = SDL_GetPerformanceCounter();
+        //float telapsed = (float)(tend - tstart) / SDL_GetPerformanceFrequency() * 1000;
+        //SDL_Delay(floor(stpf - telapsed));
     }
     
     glad_glDeleteProgram(program);
@@ -245,4 +270,54 @@ GLuint make_buffer(GLenum type, GLenum usage, size_t size, const void *data) {
     glad_glBufferData(type, size, data, usage);
     
     return buff;
+}
+
+
+uint8_t handle_keys(SDL_Event ev, uint8_t velo) {
+    switch (ev.key.key) {
+        case SDLK_LEFT:
+            velo &= ~1U;
+            velo |= ev.key.down;
+            break;
+        case SDLK_RIGHT:
+            velo &= ~(1U << 4);
+            velo |= ev.key.down << 4;
+            break;
+        case SDLK_LSHIFT:
+            velo &= ~(1U << 1);
+            velo |= ev.key.down << 1;
+            break;
+        case SDLK_SPACE:
+            velo &= ~(1U << 5);
+            velo |= ev.key.down << 5;
+            break;
+        case SDLK_DOWN:
+            velo &= ~(1U << 2);
+            velo |= ev.key.down << 2;
+            break;
+        case SDLK_UP:
+            velo &= ~(1U << 6);
+            velo |= ev.key.down << 6;
+            break;
+        default:
+            break;
+    }
+
+    return velo;
+}
+
+
+void handle_move(Camera *cam, uint8_t velo) {
+    velo ^= velo >> 4;
+    if (velo & 1) {
+        cam->data[0] += (-0.5f + ((velo >> 4) & 1)) * SPEED;
+    }
+    velo >>= 1;
+    if (velo & 1) {
+        cam->data[1] += (-0.5f + ((velo >> 4) & 1)) * SPEED;
+    }
+    velo >>= 1;
+    if (velo & 1) {
+        cam->data[2] += (-0.5f + ((velo >> 4) & 1)) * SPEED;
+    }
 }

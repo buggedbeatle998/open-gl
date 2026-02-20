@@ -17,9 +17,9 @@ layout (std140, binding = 1) readonly uniform pconst {
     ivec2 res;
     vec2 inv_res;
     vec3 sun_dir;
-    vec3 ground;
-    vec3 horizon;
-    vec3 zenith;
+    vec4 ground;
+    vec4 horizon;
+    vec4 zenith;
     float horz_dist;
     float fov;
     float asp_rat;
@@ -33,7 +33,7 @@ const float half_pi = 1.571;
 const uint num_reflects = 5;
 
 
-vec3 sample_env(vec3 pos, vec3 dir);
+vec4 sample_env(vec3 pos, vec3 dir);
 
 
 void main(void) {
@@ -49,10 +49,6 @@ void main(void) {
         
         uint num = spheres.spheres.length();
         for (uint r = 0; r < num_reflects; ++r) {
-            bool hit = false;
-            float dist;
-            vec3 _change;
-            vec3 _norm;
             uint i;
             for (i = 0; i < num; ++i) {
                 Sphere sphere = spheres.spheres[i];
@@ -65,34 +61,26 @@ void main(void) {
                 mid -= sqrt(discrim);
                 if (mid < 0)
                     continue;
-                if (dot(mid * start - diff, start) > 0) {
+                ray_pos += mid * start;
+                if (dot(ray_pos - sphere.pos, start) > 0)
                     continue;
-                }
-                if (hit) {
-                    if (mid > dist)
-                        continue;
-                } else
-                    hit = true;
-                dist = mid;
-                _change = mid * start;
-                _norm = normalize(_change - diff);
-            }
-            if (hit) {
-                ray_pos += _change;
-                start = reflect(start, _norm);
+                vec3 norm = normalize(ray_pos - sphere.pos);
+                start = reflect(start, norm);
                 shade *= fma(dot(start, sun_dir), 0.25, 0.75);
-            } else
+                break;
+            }
+            if (i == num)
                 break;
         }
-        imageStore(tex, texel, vec4(sample_env(ray_pos, start) * shade, 1.0));
+        imageStore(tex, texel, sample_env(ray_pos, start));
     }
 }
 
-vec3 sample_env(vec3 pos, vec3 dir) {
+vec4 sample_env(vec3 pos, vec3 dir) {
     if (fma(dir.y, horz_dist, pos.y) < 0) {
-        vec2 gpos = dir.xz * (pos.y / dir.y) - pos.xz;
-        gpos = mod(gpos, 10.0);
-        return ((gpos.x < 5.0) ^^ (gpos.y < 5.0)) ? vec3(0.0, 1.0, 1.0) : vec3(1.0, 0.0, 0.0);
+        vec2 gpos = dir.xz * (pos.y / dir.y);
+        gpos = mod(gpos, 2);
+        return ((gpos.x < 1) ^^ (gpos.y < 1)) ? vec4(0.0, 1.0, 1.0, 1.0) : vec4(1.0, 0.0, 0.0, 1.0);
     }
     
     float temp = half_pi * horz_dist;
