@@ -70,10 +70,12 @@ int main(void) {
     if (!SDL_Init(SDL_INIT_VIDEO))
         return -1;
    
-    const size_t num_spheres = 10;
+    const size_t len_side = 20;
+    const size_t num_spheres = len_side * len_side;
     Sphere *sphere_arr = malloc(sizeof(Sphere) * num_spheres);
     for (size_t i = 0; i < num_spheres; ++i) {
-        sphere_arr[i] = (Sphere){{rand_float(-5.f, 5.f), rand_float(5.f, 15.f), rand_float(5.f, 15.f)}, 1.f};
+        //printf("%lld\n", (i % len_side) - len_side / 2);
+        sphere_arr[i] = (Sphere){{(float)(i % len_side) - (float)len_side / 2, 5.f, (float)(i / len_side) + 5.f}, 0.2f};
     }
     Camera main_cam = {{0.f, 10.f, 0.f, 0.f, 0.f, 1.f}};
     
@@ -110,7 +112,7 @@ int main(void) {
         {0.5f, 0.5f, 0.5f         ,0.f},
         {0.8f, 0.9f, 1.f          ,0.f},
         {0.5f, 0.5f, 1.f          },
-        5000.f,
+        1000.f, // 5000.f is more accurate
         1.047f,
         (float)tex_h / tex_w
     });
